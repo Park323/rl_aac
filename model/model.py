@@ -20,3 +20,15 @@ class MnistModel(BaseModel):
         x = F.dropout(x, training=self.training)
         x = self.fc2(x)
         return F.log_softmax(x, dim=1)
+
+
+class DACAN(BaseModel):
+    """
+    Refer `Diverse Audio Captioning via Adversarial Training`
+    """
+    def __init__(self,):
+        
+        pass
+
+    def forward(self, inputs):
+        pass

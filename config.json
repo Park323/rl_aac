@@ -7,13 +7,19 @@
         "args": {}
     },
     "data_loader": {
-        "type": "MnistDataLoader",
+        "type": "ClothoDataLoader",
         "args":{
-            "data_dir": "data/",
+            "data_dir": "/home/nas/DB/Clotho/clotho_v2_vggish/development",
+            "optional_dir": "/home/nas/DB/Clotho/clotho_v2_vggish/validation",
             "batch_size": 128,
             "shuffle": true,
             "validation_split": 0.1,
-            "num_workers": 2
+            "num_workers": 2,
+            "max_audio_len": 32,
+            "max_token_len": 64,
+            "tokenizer": "facebook/bart-base",
+            "input_field":"vggish_embeddings",
+            "output_field":"caption"
         }
     },
     "optimizer": {
@@ -26,7 +32,7 @@
     },
     "loss": "nll_loss",
     "metrics": [
-        "accuracy", "top_k_acc"
+        "aac_metrics"
     ],
     "lr_scheduler": {
         "type": "StepLR",
