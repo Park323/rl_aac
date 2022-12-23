@@ -3,11 +3,12 @@ import collections
 import torch
 import numpy as np
 import data_loader.data_loaders as module_data
-import model.loss as Loss
+import trainer as Trainer
+import trainer.loss as Loss
 import metric as Metric
 import model as Model
+import model.tokenizer as Tokenizer
 from parse_config import ConfigParser
-from trainer import Trainer
 from utils import prepare_device
 
 import pdb
@@ -23,8 +24,11 @@ np.random.seed(SEED)
 def main(config:ConfigParser):
     logger = config.get_logger('train')
 
+    # build tokenizer
+    tokenizer = config.init_obj('tokenizer', Tokenizer)
+
     # setup data_loader instances
-    data_loader = config.init_obj('data_loader', module_data)
+    data_loader = config.init_obj('data_loader', module_data, tokenizer=tokenizer)
     valid_data_loader = data_loader.split_validation()
     
     # build model architecture, then print to console
@@ -46,12 +50,17 @@ def main(config:ConfigParser):
     optimizer = config.init_obj('optimizer', torch.optim, trainable_params)
     lr_scheduler = config.init_obj('lr_scheduler', torch.optim.lr_scheduler, optimizer)
 
-    trainer = Trainer(model, criterion, metrics, optimizer,
-                      config=config,
-                      device=device,
-                      data_loader=data_loader,
-                      valid_data_loader=valid_data_loader,
-                      lr_scheduler=lr_scheduler)
+    trainer = config.init_obj(
+        'trainer', Trainer, 
+        model, criterion, metrics, optimizer,
+        config=config,
+        device=device,
+        data_loader=data_loader,
+        valid_data_loader=valid_data_loader,
+        lr_scheduler=lr_scheduler,
+        tokenizer=tokenizer,
+    )
+    # trainer = Trainer()
 
     trainer.train()
 

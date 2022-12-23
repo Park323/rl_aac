@@ -9,7 +9,7 @@ class Trainer(BaseTrainer):
     Trainer class
     """
     def __init__(self, model, criterion, metric_ftns, optimizer, config, device,
-                 data_loader, valid_data_loader=None, lr_scheduler=None, len_epoch=None):
+                 data_loader, valid_data_loader=None, lr_scheduler=None, len_epoch=None, *args, **kwargs):
         super().__init__(model, criterion, metric_ftns, optimizer, config)
         self.config = config
         self.device = device
@@ -105,3 +105,165 @@ class Trainer(BaseTrainer):
             current = batch_idx
             total = self.len_epoch
         return base.format(current, total, 100.0 * current / total)
+
+
+class PolicyGradientTrainer(Trainer):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.tokenizer = kwargs['tokenizer']
+
+    def _train_epoch(self, epoch):
+        """
+        Training logic for an epoch
+
+        :param epoch: Integer, current training epoch.
+        :return: A log that contains average loss and metric in this epoch.
+        """
+        self.model.train()
+        self.train_metrics.reset()
+        for batch_idx, items in enumerate(self.data_loader):
+            audio_inputs, mem_mask, tgt_mask, filename, target = items.values()
+            audio_inputs, target = audio_inputs.to(self.device), target.to(self.device)
+            mem_mask, tgt_mask = mem_mask.to(self.device).to(bool), tgt_mask.to(self.device).to(bool)
+
+            self.optimizer.zero_grad()
+            output, logp = self.model(audio_inputs, mem_mask)
+            test_output = self.model(audio_inputs, mem_mask, test=True)
+            
+            self.writer.set_step((epoch - 1) * self.len_epoch + batch_idx)
+            for met in self.metric_ftns:
+                # assert met.__name__ == 'aac_metrics', "Only aac_metrics is available in PolicyGradient Mode!"
+                scores = met({'predictions': output, 'label_ids': target, 'filenames': filename}, self.tokenizer)
+                baseline_scores = met({'predictions': test_output, 'label_ids': target, 'filenames': filename}, self.tokenizer)
+                self.train_metrics.update(met.__name__, scores.mean())
+            
+            rewards = scores - baseline_scores
+            loss = self.criterion(logp, rewards)
+            loss.backward()
+            self.optimizer.step()
+            self.train_metrics.update('loss', loss.item())
+
+            if batch_idx % self.log_step == 0:
+                self.logger.debug('Train Epoch: {} {} Loss: {:.6f} Rewards: {:.6f} Lr: {:.6f}'.format(
+                    epoch,
+                    self._progress(batch_idx),
+                    loss.item(),
+                    scores.mean(),
+                    self.optimizer.param_groups[0]['lr']))
+
+            if batch_idx == self.len_epoch:
+                break
+        log = self.train_metrics.result()
+
+        if self.do_validation:
+            val_log = self._valid_epoch(epoch)
+            log.update(**{'val_'+k : v for k, v in val_log.items()})
+
+        if self.lr_scheduler is not None:
+            self.lr_scheduler.step()
+        return log
+
+    def _valid_epoch(self, epoch):
+        """
+        Validate after training an epoch
+
+        :param epoch: Integer, current training epoch.
+        :return: A log that contains information about validation
+        """
+        self.model.eval()
+        self.valid_metrics.reset()
+        with torch.no_grad():
+            for batch_idx, items in enumerate(self.data_loader):
+                audio_inputs, mem_mask, tgt_mask, filename, target = items.values()
+                audio_inputs, target = audio_inputs.to(self.device), target.to(self.device)
+                mem_mask, tgt_mask = mem_mask.to(self.device).to(bool), tgt_mask.to(self.device).to(bool)
+
+                output = self.model(audio_inputs, mem_mask, test=True)
+
+                self.writer.set_step((epoch - 1) * len(self.valid_data_loader) + batch_idx, 'valid')
+                for met in self.metric_ftns:
+                    scores = met({'predictions': output, 'label_ids': target, 'filenames': filename}, self.tokenizer)
+                    score = scores.mean()
+                    self.valid_metrics.update(met.__name__, score)
+                
+                self.valid_metrics.update('loss', -score)
+
+        # add histogram of model parameters to the tensorboard
+        # for name, p in self.model.named_parameters():
+        #     self.writer.add_histogram(name, p, bins='auto')
+        return self.valid_metrics.result()
+
+
+class SemanticTrainer(Trainer):
+    def _train_epoch(self, epoch):
+        """
+        Training logic for an epoch
+
+        :param epoch: Integer, current training epoch.
+        :return: A log that contains average loss and metric in this epoch.
+        """
+        self.model.train()
+        self.train_metrics.reset()
+        
+        for batch_idx, items in enumerate(self.data_loader):
+            audio_inputs, mem_mask, tgt_mask, file_name, targets = items.values()
+            audio_inputs, targets = audio_inputs.to(self.device), targets.to(self.device)
+            # mem_mask, tgt_mask = mem_mask.to(self.device), tgt_mask.to(self.device)
+
+            self.optimizer.zero_grad()
+            au_emb, lm_emb = self.model(audio_inputs, targets)
+            loss = self.criterion(au_emb, lm_emb, targets)
+            loss.backward()
+            self.optimizer.step()
+
+            self.writer.set_step((epoch - 1) * self.len_epoch + batch_idx)
+            self.train_metrics.update('loss', loss.item())
+            for met in self.metric_ftns:
+                self.train_metrics.update(met.__name__, met(au_emb, lm_emb))
+
+            if batch_idx % self.log_step == 0:
+                self.logger.debug('Train Epoch: {} {} Loss: {:.6f}'.format(
+                    epoch,
+                    self._progress(batch_idx),
+                    loss.item()))
+
+            if batch_idx == self.len_epoch:
+                break
+        log = self.train_metrics.result()
+
+        if self.do_validation:
+            val_log = self._valid_epoch(epoch)
+            log.update(**{'val_'+k : v for k, v in val_log.items()})
+
+        if self.lr_scheduler is not None:
+            self.lr_scheduler.step()
+        return log
+
+    def _valid_epoch(self, epoch):
+        """
+        Validate after training an epoch
+
+        :param epoch: Integer, current training epoch.
+        :return: A log that contains information about validation
+        """
+        self.model.eval()
+        self.valid_metrics.reset()
+        with torch.no_grad():
+            for batch_idx, items in enumerate(self.valid_data_loader):
+                audio_inputs, mem_mask, tgt_mask, file_name, targets = items.values()
+                audio_inputs, targets = audio_inputs.to(self.device), targets.to(self.device)
+                # mem_mask, tgt_mask = mem_mask.to(self.device), tgt_mask.to(self.device)
+
+                self.optimizer.zero_grad()
+                au_emb, lm_emb = self.model(audio_inputs, targets)
+                loss = self.criterion(au_emb, lm_emb, targets)
+            
+                self.writer.set_step((epoch - 1) * len(self.valid_data_loader) + batch_idx, 'valid')
+                self.valid_metrics.update('loss', loss.item())
+                for met in self.metric_ftns:
+                    self.valid_metrics.update(met.__name__, met(au_emb, lm_emb))
+
+        # add histogram of model parameters to the tensorboard
+        for name, p in self.model.named_parameters():
+            self.writer.add_histogram(name, p, bins='auto')
+        return self.valid_metrics.result()

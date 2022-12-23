@@ -114,3 +114,4 @@ __MACOSX/
 # custom
 data
 dcase-baseline
+audioset_tagging_cnn

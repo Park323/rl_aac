@@ -1,13 +1,24 @@
 {
     "name": "AAC_Semantic",
-    "n_gpu": 1,
+    "n_gpu": 2,
+
+    "tokenizer": {
+        "type": "ExtTokenizer",
+        "args": {
+            "path": "facebook/bart-base"
+        }
+    },
 
     "arch": {
-        "type": "SemanticEvaluator",
+        "type": "CaptionGenerator",
         "args": {
-            "input_dims": 128, 
-            "out_dims": 128,
-            "vocab_size": 50265
+            "input_dim": 128,
+            "vocab_size": 50265,
+            "num_layers": 6,
+            "num_heads": 4,
+            "ff_factor": 4,
+            "max_seq_len": 64,
+            "randomness": true
         }
     },
     "data_loader": {
@@ -15,13 +26,12 @@
         "args":{
             "data_dir": "/home/nas/DB/Clotho/clotho_v2_vggish/development",
             "optional_dir": "/home/nas/DB/Clotho/clotho_v2_vggish/validation",
-            "batch_size": 256,
+            "batch_size": 32,
             "shuffle": true,
-            "validation_split": 0.1,
+            "validation_split": 0.0,
             "num_workers": 2,
             "max_audio_len": 32,
             "max_token_len": 64,
-            "tokenizer": "facebook/bart-base",
             "input_field":"vggish_embeddings",
             "output_field":"caption"
         }
@@ -29,14 +39,14 @@
     "optimizer": {
         "type": "Adam",
         "args":{
-            "lr": 0.0001,
+            "lr": 0.001,
             "weight_decay": 1e-5,
             "amsgrad": true
         }
     },
-    "loss": "contrastive_loss",
+    "loss": "policy_loss",
     "metrics": [
-        "cosine_similarity"
+        "CIDEr"
     ],
     "lr_scheduler": {
         "type": "StepLR",
@@ -46,7 +56,7 @@
         }
     },
     "trainer": {
-        "type": "SemanticTrainer",
+        "type": "PolicyGradientTrainer",
         "args": {},
 
         "epochs": 100,

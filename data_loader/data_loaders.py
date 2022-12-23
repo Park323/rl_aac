@@ -17,7 +17,7 @@ class ClothoDataLoader(BaseDataLoader):
             assert att in kwargs.keys(), f"{att} is not defined."
         self.kwargs = kwargs
 
-        self.dataset = Dataset.ClothoDataset(cfg=self.kwargs, data_dir=self.data_dir)
+        self.dataset = Dataset.ClothoDataset(cfg=self.kwargs, data_dir=self.data_dir, tokenizer=kwargs['tokenizer'])
         super().__init__(self.dataset, batch_size, shuffle, validation_split, num_workers)
 
     def split_validation(self):

@@ -11,7 +11,7 @@ class ClothoDataset(Dataset):
     """
     Load Clotho data
     """
-    def __init__(self, cfg, data_dir):
+    def __init__(self, cfg, data_dir, tokenizer=None):
         super().__init__()
         self.examples = sorted(data_dir.iterdir())
         
@@ -20,30 +20,55 @@ class ClothoDataset(Dataset):
         self.input_name = cfg['input_field']
         self.output_name = cfg['output_field']
 
-        self.tokenizer = AutoTokenizer.from_pretrained(cfg['tokenizer'], use_fast=True)
+        if tokenizer:
+            self.tokenizer = tokenizer
+        else:
+            print("Initialized Tokenizer in ClothoDataset Module")
+            self.tokenizer = AutoTokenizer.from_pretrained(cfg['tokenizer'], use_fast=True)
 
     def __len__(self):
         return len(self.examples)
 
     def __getitem__(self, item):
-        ex = self.examples[item]
-        fname = Path(ex).name
-        ex = np.load(str(ex), allow_pickle=True)
+        ex = None
+        captions = list()
+        for i in range(5): # Assume the number of labels for each audio sample := 5
+            fpath = self.examples[(item//5)*5 + i]
+            _ex = np.load(str(fpath), allow_pickle=True)
+            captions.append(_ex[self.output_name].item())
+            if item % 5 == i: 
+                ex = _ex   
+                fname = Path(fpath).name
         
         # ----- Labels/Decoder inputs -----
-        ou_e = ex[self.output_name].item()
         
-        if ou_e is not None:
+        tok_e = {'input_ids': None, 'attention_mask': None}
+        for ou_e in captions:
             ou_e = ou_e.translate(str.maketrans('', '', string.punctuation))
             ou_e = ou_e.lower()
             
-            tok_e = self.tokenizer(ou_e, max_length=self.max_token_len, return_tensors='pt', padding='max_length')
-            if tok_e['input_ids'].size(1) > self.max_token_len:
-                print('Found caption longer than max_token_len parameter ({} tokens).'.format(tok_e['input_ids'].size(1)))
-                tok_e['input_ids'] = tok_e['input_ids'][:,:self.max_token_len]
-                tok_e['attention_mask'] = tok_e['attention_mask'][:,:self.max_token_len]
-        else:
-            tok_e = {'input_ids': None, 'attention_mask': None}
+            _tok_e = self.tokenizer(ou_e, max_length=self.max_token_len, return_tensors='pt', padding='max_length')
+            if _tok_e['input_ids'].size(1) > self.max_token_len:
+                print('Found caption longer than max_token_len parameter ({} tokens).'.format(_tok_e['input_ids'].size(1)))
+                _tok_e['input_ids'] = _tok_e['input_ids'][:,:self.max_token_len]
+                _tok_e['attention_mask'] = _tok_e['attention_mask'][:,:self.max_token_len]
+            tok_e['input_ids'] = torch.cat([tok_e['input_ids'],_tok_e['input_ids']], dim=0) if tok_e['input_ids'] is not None else _tok_e['input_ids']
+            tok_e['attention_mask'] = torch.cat([tok_e['attention_mask'],_tok_e['attention_mask']], dim=0) if tok_e['attention_mask'] is not None else _tok_e['attention_mask']
+            
+
+        # ou_e = ex[self.output_name].item()
+        
+        # if ou_e is not None:
+        #     ou_e = ou_e.translate(str.maketrans('', '', string.punctuation))
+        #     ou_e = ou_e.lower()
+            
+        #     tok_e = self.tokenizer(ou_e, max_length=self.max_token_len, return_tensors='pt', padding='max_length')
+        #     if tok_e['input_ids'].size(1) > self.max_token_len:
+        #         print('Found caption longer than max_token_len parameter ({} tokens).'.format(tok_e['input_ids'].size(1)))
+        #         tok_e['input_ids'] = tok_e['input_ids'][:,:self.max_token_len]
+        #         tok_e['attention_mask'] = tok_e['attention_mask'][:,:self.max_token_len]
+        # else:
+        #     tok_e = {'input_ids': None, 'attention_mask': None}
         
         # ----- Audio conditioning -----
         in_e = ex[self.input_name].item()

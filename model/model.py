@@ -1,7 +1,9 @@
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from base import BaseModel
-
+from .generator import CaptionGenerator
+from .panns import Cnn10
 
 class MnistModel(BaseModel):
     def __init__(self, num_classes=10):
@@ -26,9 +28,29 @@ class DACAN(BaseModel):
     """
     Refer `Diverse Audio Captioning via Adversarial Training`
     """
-    def __init__(self,):
-        
-        pass
+    def __init__(
+        self,
+        input_dim:int,
+        vocab_size:int,
+        num_layers:int = None,
+        num_heads:int = None,
+        ff_factor:int = None,
+        max_seq_len:int = None,
+    ):
+        self.cnn = Cnn10(
+            32000, 1024, 320, 64, 50, 14000, 527
+        )
+        pretrained_state = torch.load('saved/models/Cnn10_mAP=0.380.pth')
+        self.cnn.load_state_dict(pretrained_state, strict=False)
+        self.gen = CaptionGenerator(
+            input_dim,
+            vocab_size,
+            num_layers,
+            num_heads,
+            ff_factor,
+            max_seq_len,
+        )
 
-    def forward(self, inputs):
-        pass
+    def forward(self, inputs, input_masks, test=False):
+        input_features = self.cnn(inputs)['embedding']
+        return self.gen(input_features, input_masks, test=test)
